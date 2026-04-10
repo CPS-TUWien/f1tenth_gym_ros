@@ -22,7 +22,9 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
+from std_msgs.msg import Bool
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped
@@ -97,6 +99,9 @@ class GymBridge(Node):
         self.ego_namespace = self.get_parameter('ego_namespace').value
         ego_odom_topic = self.ego_namespace + '/' + self.get_parameter('ego_odom_topic').value
         self.scan_distance_to_base_link = self.get_parameter('scan_distance_to_base_link').value
+
+        ego_coll_topic = self.ego_namespace + '/' + "in_collision"
+        self.ego_in_collision = None
         
         if num_agents == 2:
             self.has_opp = True
@@ -117,6 +122,9 @@ class GymBridge(Node):
             opp_odom_topic = self.opp_namespace + '/' + self.get_parameter('opp_odom_topic').value
             opp_drive_topic = self.get_parameter('opp_drive_topic').value
 
+            opp_coll_topic = self.opp_namespace + '/' + "in_collision"
+            self.opp_in_collision = None
+
             ego_opp_odom_topic = self.ego_namespace + '/' + self.get_parameter('ego_opp_odom_topic').value
             opp_ego_odom_topic = self.opp_namespace + '/' + self.get_parameter('opp_ego_odom_topic').value
         else:
@@ -135,12 +143,28 @@ class GymBridge(Node):
         # publishers
         self.ego_scan_pub = self.create_publisher(LaserScan, ego_scan_topic, 10)
         self.ego_odom_pub = self.create_publisher(Odometry, ego_odom_topic, 10)
+        self.ego_coll_pub = self.create_publisher(
+            Bool,
+            ego_coll_topic,
+            qos_profile = QoSProfile(
+                durability = QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                depth = 1,
+            )
+        )
         self.ego_drive_published = False
         if num_agents == 2:
             self.opp_scan_pub = self.create_publisher(LaserScan, opp_scan_topic, 10)
             self.ego_opp_odom_pub = self.create_publisher(Odometry, ego_opp_odom_topic, 10)
             self.opp_odom_pub = self.create_publisher(Odometry, opp_odom_topic, 10)
             self.opp_ego_odom_pub = self.create_publisher(Odometry, opp_ego_odom_topic, 10)
+            self.opp_coll_pub = self.create_publisher(
+                Bool,
+                opp_coll_topic,
+                qos_profile = QoSProfile(
+                    durability = QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                    depth = 1,
+                )
+            )
             self.opp_drive_published = False
 
         # subscribers
@@ -261,6 +285,17 @@ class GymBridge(Node):
         self._publish_laser_transforms(ts)
         self._publish_wheel_transforms(ts)
 
+        # pub collision state if changed
+        if self.ego_in_collision != self.ego_collision:
+            self.ego_in_collision = self.ego_collision
+            self.ego_coll_pub.publish(Bool(data = self.ego_collision))
+
+        if self.has_opp:
+            if self.opp_in_collision != self.opp_collision:
+                self.opp_in_collision = self.opp_collision
+                self.opp_coll_pub.publish(Bool(data = self.opp_collision))
+
+
     def _update_sim_state(self):
         self.ego_scan = list(self.obs['scans'][0])
         if self.has_opp:
@@ -271,6 +306,7 @@ class GymBridge(Node):
             self.opp_speed[0] = self.obs['linear_vels_x'][1]
             self.opp_speed[1] = self.obs['linear_vels_y'][1]
             self.opp_speed[2] = self.obs['ang_vels_z'][1]
+            self.opp_collision = bool(self.obs['collisions'][1] > 0.)
 
         self.ego_pose[0] = self.obs['poses_x'][0]
         self.ego_pose[1] = self.obs['poses_y'][0]
@@ -278,6 +314,7 @@ class GymBridge(Node):
         self.ego_speed[0] = self.obs['linear_vels_x'][0]
         self.ego_speed[1] = self.obs['linear_vels_y'][0]
         self.ego_speed[2] = self.obs['ang_vels_z'][0]
+        self.ego_collision = bool(self.obs['collisions'][0] > 0.)
 
         
 
